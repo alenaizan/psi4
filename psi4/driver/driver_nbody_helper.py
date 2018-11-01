@@ -28,11 +28,18 @@
 
 from __future__ import print_function
 from __future__ import absolute_import
+import json
 
 import numpy as np
 
 from psi4 import core
 from psi4.driver.p4util.exceptions import *
+
+try:
+    # For parallel nbody and/or CBS computations
+    import qcfractal.interface as portal
+except ImportError:
+    pass
 
 
 def multi_level(func, **kwargs):
@@ -77,10 +84,13 @@ def multi_level(func, **kwargs):
         molecule.set_name('%i' %n)
         kwargs_copy = kwargs.copy()
         kwargs_copy['max_nbody'] = n
+        if kwargs.get('sow', None) or kwargs.get('reap', None):
+            kwargs_copy['dataset'] = kwargs['dataset'][n]
         energy_bsse_dict = {b: 0 for b in kwargs['bsse_type']}
         if isinstance(levels[n], str):
             # If a new level of theory is provided, compute contribution
             ret, wfn = nbody_gufunc(func, levels[n], **kwargs_copy)
+            if kwargs_copy.get('sow', None): continue
             wfns[n] = wfn
         else:
             # For the n-body contribution, use available data from the higher order levels[n]-body
@@ -107,20 +117,34 @@ def multi_level(func, **kwargs):
 
     if supersystem:
         # Super system recovers higher order effects at a lower level
-        molecule.set_name('supersystem')
         kwargs_copy = kwargs.copy()
+        if kwargs.get('sow', None) or kwargs.get('reap', None):
+            kwargs_copy['dataset'] = kwargs['dataset']['supersystem']
+        molecule.set_name('supersystem')
         kwargs_copy.pop('bsse_type')
         kwargs_copy.pop('ptype')
-        ret, wfn_super = func(supersystem, **kwargs_copy)
+        if kwargs.get('sow', None):
+            mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+            kwargs_copy['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
+        else:
+            ret, wfn_super = func(supersystem, **kwargs_copy)
+        super_energy = core.get_variable('CURRENT ENERGY')
         core.clean()
         kwargs_copy = kwargs.copy()
+        if kwargs.get('sow', None) or kwargs.get('reap', None):
+            kwargs_copy['dataset'] = kwargs['dataset']['supersystem']
         kwargs_copy['bsse_type'] = 'nocp'
         kwargs_copy['max_nbody'] = max(levels)
         # Subtract lower order effects to avoid double counting
         ret, wfn = nbody_gufunc(func, supersystem, **kwargs_copy)
-        energy_result += wfn_super.energy() - wfn.get_variable(str(max(levels)))
+        if kwargs.get('sow', None):
+            kwargs['levels'] = levels
+            kwargs['levels']['supersystem'] = supersystem
+            return None
+
+        energy_result += super_energy - wfn.get_variable(str(max(levels)))
         for b in kwargs['bsse_type']:
-            energy_body_contribution[b][molecule.nfragments()] = wfn_super.energy() - wfn.get_variable(
+            energy_body_contribution[b][molecule.nfragments()] = super_energy - wfn.get_variable(
                 str(max(levels)))
 
         if ptype in ['gradient', 'hessian']:
@@ -128,6 +152,13 @@ def multi_level(func, **kwargs):
         if ptype == 'hessian':
             hessian_result += np.array(wfn_super.hessian()) - np.array(wfn.get_array('HESSIAN ' + str(max(levels))))
         levels['supersystem'] = supersystem
+
+    if kwargs.get('sow', None):
+        if kwargs['return_wfn']:
+            return (None, None)
+        else:
+            return None
+       
 
     for b in kwargs['bsse_type']:
         for n in energy_body_contribution[b]:
@@ -139,7 +170,7 @@ def multi_level(func, **kwargs):
         _print_nbody_energy(energy_body_dict[b], '%s-corrected multilevel many-body expansion' % b.upper(),
                             is_embedded)
 
-    if not kwargs['return_total_data']:
+    if not kwargs.get('return_total_data', False):
         # Remove monomer cotribution for interaction data
         energy_result -= energy_body_dict[kwargs['bsse_type'][0]][1]
         if ptype in ['gradient', 'hessian']:
@@ -158,6 +189,7 @@ def multi_level(func, **kwargs):
         for i in energy_body_dict[b]:
             wfn_out.set_variable(str(i) + b, energy_body_dict[b][i])
 
+    kwargs['levels'] = levels
     if kwargs['return_wfn']:
         return (ptype_result, wfn_out)
     else:

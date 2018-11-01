@@ -1,4 +1,4 @@
-#
+
 # @BEGIN LICENSE
 #
 # Psi4: an open-source quantum chemistry software package
@@ -42,6 +42,13 @@ from psi4.driver import driver_util
 from psi4.driver import psifiles as psif
 from psi4.driver.p4util.exceptions import *
 from psi4.driver.procrouting.interface_cfour import cfour_psivar_list
+
+try:
+    # For parallel CBS computations
+    import qcfractal.interface as portal
+except ImportError:
+    pass
+
 
 zeta_values = ['d', 't', 'q', '5', '6', '7', '8']
 zeta_val2sym = {k + 2: v for k, v in zip(range(7), zeta_values)}
@@ -239,7 +246,6 @@ def scf_xtpl_helgaker_2(functionname, zLO, valueLO, zHI, valueHI, verbose=True, 
        DOI: 10.1016/S0009-2614(99)00179-7
 
     """
-
     if type(valueLO) != type(valueHI):
         raise ValidationError(
             "scf_xtpl_helgaker_2: Inputs must be of the same datatype! (%s, %s)" % (type(valueLO), type(valueHI)))
@@ -1579,6 +1585,9 @@ def cbs(func, label, **kwargs):
 
         # Make energy(), etc. call
         response = func(molecule=molecule, **kwargs)
+        if kwargs['sow']:
+            continue
+
         if ptype == 'energy':
             mc['f_energy'] = response
         elif ptype == 'gradient':
@@ -1620,7 +1629,10 @@ def cbs(func, label, **kwargs):
                 mce['f_gradient'] = mc['f_gradient']
                 mce['f_hessian'] = mc['f_hessian']
 
-    psioh.set_specific_retention(psif.PSIF_SCF_MOS, False)
+    if kwargs['sow']:
+        return None, None
+
+    psioh.set_specific_retention(constants.PSIF_SCF_MOS, False)
 
     # Build string of title banner
     cbsbanners = ''
@@ -2005,6 +2017,8 @@ def _cbs_gufunc(func, total_method_name, **kwargs):
         stage['treatment'] = "corl"
         metadata.append(stage)
         
+    cbs_kwargs.update({'sow': kwargs.get('sow', None), 'reap': kwargs.get('reap', None),
+                       'dataset': kwargs.get('dataset', None), 'portal': kwargs.get('portal', None)})
     cbs_kwargs["cbs_metadata"] = metadata
     ptype_value, wfn = cbs(func, label, **cbs_kwargs)
 

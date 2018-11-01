@@ -50,6 +50,12 @@ from psi4.driver import qcdb
 from psi4.driver.procrouting import *
 from psi4.driver.p4util.exceptions import *
 
+try:
+    # For parallel nbody and/or CBS computations
+    import qcfractal.interface as portal
+except ImportError:
+    pass
+
 # never import wrappers or aliases into this file
 
 
@@ -542,6 +548,37 @@ def energy(name, **kwargs):
                 targetfile = filepath + prefix + '.' + pid + '.' + namespace + '.' + str(filenum)
             shutil.copy(item, targetfile)
 
+    # Register all individual computations in sow mode in the qcfractal database
+    if kwargs.get('sow', None):
+        # Add all required molecules
+        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
+        except: pass
+        kwargs['dataset'].save(kwargs['portal'])
+        # Submit computations to qcfractal server
+        kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
+        kwargs['dataset'].compute(lowername, core.get_global_option('BASIS'), driver='energy')
+
+        return None, None
+
+    # Extract all results in reap mode from the qcfractal database
+    elif kwargs.get('reap', None):
+        # Use molecule.name() and level of theory/basis set to get result
+        molecule_id = kwargs['dataset'].rxn_index.loc[kwargs['dataset'].rxn_index['name'] == molecule.name(), 'molecule_id'].iloc[0]
+        result = kwargs['dataset'].client.get_results(molecule_id=molecule_id, method=lowername,
+                                                      basis=core.get_global_option('BASIS'), driver='energy')[0]
+        # Assign results to wave function and core variables
+        return_qcvars = result['psi4:qcvars']
+        wfn = core.Wavefunction.build(molecule, 'def2-svp')
+        for i, j in return_qcvars.items():
+            wfn.set_variable(i, j)
+            core.set_variable(i, j)
+        if return_wfn:
+            return (core.get_variable('CURRENT ENERGY'), wfn)
+        else:
+            return core.get_variable('CURRENT ENERGY')
+
+    # Default mode for serial computations
     wfn = procedures['energy'][lowername](lowername, molecule=molecule, **kwargs)
 
     for postcallback in hooks['energy']['post']:
@@ -671,6 +708,40 @@ def gradient(name, **kwargs):
     # Make sure the molecule the user provided is the active one
     molecule = kwargs.pop('molecule', core.get_active_molecule())
     molecule.update_geometry()
+
+    # Register all individual computations in sow mode in the qcfractal database
+    if kwargs.get('sow', None):
+        # Add all required molecules
+        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
+        except: pass
+        kwargs['dataset'].save(kwargs['portal'])
+        # Submit computations to qcfractal server
+        kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
+        kwargs['dataset'].compute(lowername, core.get_global_option('BASIS'), driver='gradient')
+
+        return None, None
+
+    # Extract all results in reap mode from the qcfractal database
+    elif kwargs.get('reap', None):
+        kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
+        print(kwargs['dataset'])
+        # Use molecule.name() and level of theory/basis set to get result
+        molecule_id = kwargs['dataset'].rxn_index.loc[kwargs['dataset'].rxn_index['name'] == molecule.name(), 'molecule_id'].iloc[0]
+        result = kwargs['dataset'].client.get_results(molecule_id=molecule_id, method=lowername,
+                                                      basis=core.get_global_option('BASIS'), driver='gradient')[0]
+        # Assign results to wave function and core variables
+        return_qcvars = result['psi4:qcvars']
+        wfn = core.Wavefunction.build(molecule, 'def2-svp')
+        for i, j in return_qcvars.items():
+            wfn.set_variable(i, j)
+            core.set_variable(i, j)
+        wfn.set_gradient(core.Matrix.from_array(np.array(result['return_result']).reshape((molecule.natom(), 3))))
+        if return_wfn:
+            return (wfn.gradient(), wfn)
+        else:
+            return wfn.gradient()
+
 
     # Does dertype indicate an analytic procedure both exists and is wanted?
     if dertype == 1:
@@ -1038,6 +1109,14 @@ def optimize(name, **kwargs):
         # Compute the gradient - preserve opt data despite core.clean calls in gradient
         core.IOManager.shared_object().set_specific_retention(1, True)
         G, wfn = gradient(lowername, return_wfn=True, molecule=moleculeclone, **kwargs)
+#        if kwargs.get('sow', None):
+#            kwargs_temp = kwargs.copy()
+#            kwargs_temp.update({'sow': False, 'reap': True})
+#            while True:
+#                try:
+#                    G, wfn = gradient(lowername, return_wfn=True, molecule=moleculeclone, **kwargs_temp)
+#                    break
+#                except: pass
         thisenergy = core.get_variable('CURRENT ENERGY')
 
         # above, used to be getting energy as last of energy list from gradient()
@@ -1238,12 +1317,48 @@ def hessian(name, **kwargs):
                 """hessian() switching to finite difference by gradients for partial Hessian calculation.\n""")
             dertype = 1
 
+
+    # Register all individual computations in sow mode in the qcfractal database
+    if kwargs.get('sow', None):
+        # Add all required molecules
+        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
+        except: pass
+        kwargs['dataset'].save(kwargs['portal'])
+        # Submit computations to qcfractal server
+        kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
+        kwargs['dataset'].compute(lowername, core.get_global_option('BASIS'), driver='hessian')
+
+        return None, None
+
+    # Extract all results in reap mode from the qcfractal database
+    elif kwargs.get('reap', None):
+        kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
+        # Use molecule.name() and level of theory/basis set to get result
+        molecule_id = kwargs['dataset'].rxn_index.loc[kwargs['dataset'].rxn_index['name'] == molecule.name(), 'molecule_id'].iloc[0]
+        result = kwargs['dataset'].client.get_results(molecule_id=molecule_id, method=lowername,
+                                                      basis=core.get_global_option('BASIS'), driver='hessian')[0]
+        # Assign results to wave function and core variables
+        return_qcvars = result['psi4:qcvars']
+        wfn = core.Wavefunction.build(molecule, 'def2-svp')
+        for i, j in return_qcvars.items():
+            wfn.set_variable(i, j)
+            core.set_variable(i, j)
+        wfn.set_hessian(core.Matrix.from_array(np.array(result['return_result']).reshape((molecule.natom()*3, molecule.natom()*3))))
+        if return_wfn:
+            return (wfn.hessain(), wfn)
+        else:
+            return wfn.hessian()
+
+
+
     # At stationary point?
     if 'ref_gradient' in kwargs:
         core.print_out("""hessian() using ref_gradient to assess stationary point.\n""")
         G0 = kwargs['ref_gradient']
     else:
         G0 = gradient(lowername, molecule=molecule, **kwargs)
+
     translations_projection_sound, rotations_projection_sound = _energy_is_invariant(G0)
     core.print_out(
         '\n  Based on options and gradient (rms={:.2E}), recommend {}projecting translations and {}projecting rotations.\n'

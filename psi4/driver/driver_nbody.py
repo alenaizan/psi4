@@ -30,6 +30,7 @@ from __future__ import print_function
 from __future__ import absolute_import
 import math
 import itertools
+import json
 
 import numpy as np
 
@@ -38,6 +39,13 @@ from psi4.driver import p4util
 from psi4.driver import constants
 from psi4.driver.p4util.exceptions import *
 from psi4.driver import driver_nbody_helper
+
+try:
+    # For parallel nbody computations
+    import qcfractal.interface as portal
+except ImportError:
+    dataset = None
+    pass
 
 ### Math helper functions
 
@@ -266,6 +274,8 @@ def nbody_gufunc(func, method_string, **kwargs):
 
     # Compute N-Body components
     component_results = compute_nbody_components(func, method_string, metadata)
+    if kwargs.get('sow', None):
+        return None, None
 
     # Assemble N-Body quantities
     nbody_results = assemble_nbody_components(metadata, component_results)
@@ -474,8 +484,14 @@ def compute_nbody_components(func, method_string, metadata):
             current_mol.set_name("%s_%i_%i" % (current_mol.name(), count, num))
             if metadata['embedding_charges']: driver_nbody_helper.electrostatic_embedding(metadata, pair=pair)
             # Save energies info
+            if kwargs.get('sow', None):
+                mol = portal.Molecule.from_json(json.loads(current_mol.to_schema(1, units='Bohr')))
+                kwargs['dataset'].add_rxn(current_mol.name(), [(mol, 1.0)])
+                continue
+
             ptype_dict[pair], wfn = func(method_string, molecule=current_mol, return_wfn=True, **kwargs)
             core.set_global_option_python('EXTERN', None)
+
             energies_dict[pair] = core.get_variable("CURRENT ENERGY")
             gradients_dict[pair] = wfn.gradient()
             var_key = "N-BODY (%s)@(%s) TOTAL ENERGY" % (', '.join([str(i) for i in pair[0]]), ', '.join(
@@ -488,6 +504,9 @@ def compute_nbody_components(func, method_string, metadata):
             #    core.set_global_option('DF_INTS_IO', 'LOAD')
 
             core.clean()
+    if kwargs.get('sow', None):
+        kwargs['dataset'].save(kwargs['portal'])
+        ptype_dict[pair], wfn = func(method_string, molecule=current_mol, return_wfn=True, **kwargs)
 
     return {
         'energies': energies_dict,
@@ -649,7 +668,7 @@ def assemble_nbody_components(metadata, component_results):
                 vmfc_ptype_by_level[n],
                 vmfc=True,
                 n=n)
-
+        
         # Add extracted monomers back.
         for i, j in enumerate(cp_monomers_in_monomer_basis):
             cp_compute_list[1].add(j)
