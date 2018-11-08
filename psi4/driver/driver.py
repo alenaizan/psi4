@@ -551,7 +551,7 @@ def energy(name, **kwargs):
     # Register all individual computations in sow mode in the qcfractal database
     if kwargs.get('sow', None):
         # Add all required molecules
-        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        mol = portal.Molecule.from_json(molecule.to_schema(1, units='Bohr')['molecule'])
         try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
         except: pass
         kwargs['dataset'].save(kwargs['portal'])
@@ -712,7 +712,7 @@ def gradient(name, **kwargs):
     # Register all individual computations in sow mode in the qcfractal database
     if kwargs.get('sow', None):
         # Add all required molecules
-        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        mol = portal.Molecule.from_json(molecule.to_schema(1, units='Bohr')['molecule'])
         try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
         except: pass
         kwargs['dataset'].save(kwargs['portal'])
@@ -725,7 +725,6 @@ def gradient(name, **kwargs):
     # Extract all results in reap mode from the qcfractal database
     elif kwargs.get('reap', None):
         kwargs['dataset'] = portal.collections.Dataset.from_server(kwargs['portal'], kwargs['dataset'].to_json()['name'])
-        print(kwargs['dataset'])
         # Use molecule.name() and level of theory/basis set to get result
         molecule_id = kwargs['dataset'].rxn_index.loc[kwargs['dataset'].rxn_index['name'] == molecule.name(), 'molecule_id'].iloc[0]
         result = kwargs['dataset'].client.get_results(molecule_id=molecule_id, method=lowername,
@@ -1108,15 +1107,19 @@ def optimize(name, **kwargs):
 
         # Compute the gradient - preserve opt data despite core.clean calls in gradient
         core.IOManager.shared_object().set_specific_retention(1, True)
+        if kwargs.get('sow', None):
+            kwargs['dataset'] = portal.collections.Dataset("opt%i" %n, ds_type="rxn")
         G, wfn = gradient(lowername, return_wfn=True, molecule=moleculeclone, **kwargs)
-#        if kwargs.get('sow', None):
-#            kwargs_temp = kwargs.copy()
-#            kwargs_temp.update({'sow': False, 'reap': True})
-#            while True:
-#                try:
-#                    G, wfn = gradient(lowername, return_wfn=True, molecule=moleculeclone, **kwargs_temp)
-#                    break
-#                except: pass
+        if kwargs.get('sow', None):
+            core.be_quiet()
+            kwargs_temp = kwargs.copy()
+            kwargs_temp.update({'sow': False, 'reap': True})
+            while True:
+                try:
+                    G, wfn = gradient(lowername, return_wfn=True, molecule=moleculeclone, **kwargs_temp)
+                    core.reopen_outfile()
+                    break
+                except: pass
         thisenergy = core.get_variable('CURRENT ENERGY')
 
         # above, used to be getting energy as last of energy list from gradient()
@@ -1321,7 +1324,7 @@ def hessian(name, **kwargs):
     # Register all individual computations in sow mode in the qcfractal database
     if kwargs.get('sow', None):
         # Add all required molecules
-        mol = portal.Molecule.from_json(json.loads(molecule.to_schema(1, units='Bohr')))
+        mol = portal.Molecule.from_json(molecule.to_schema(1, units='Bohr')['molecule'])
         try: kwargs['dataset'].add_rxn(molecule.name(), [(mol, 1.0)])
         except: pass
         kwargs['dataset'].save(kwargs['portal'])
@@ -1346,7 +1349,7 @@ def hessian(name, **kwargs):
             core.set_variable(i, j)
         wfn.set_hessian(core.Matrix.from_array(np.array(result['return_result']).reshape((molecule.natom()*3, molecule.natom()*3))))
         if return_wfn:
-            return (wfn.hessain(), wfn)
+            return (wfn.hessian(), wfn)
         else:
             return wfn.hessian()
 
@@ -1402,7 +1405,6 @@ def hessian(name, **kwargs):
         for n, displacement in enumerate(findif_meta_dict["displacements"].values(), start=1):
             _process_displacement(
                 gradient, lowername, moleculeclone, displacement, n, ndisp, write_orbitals=False, **kwargs)
-
         wfn = _process_displacement(gradient, lowername, moleculeclone, findif_meta_dict["reference"], ndisp, ndisp,
                                     **kwargs)
 

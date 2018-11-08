@@ -1585,7 +1585,7 @@ def cbs(func, label, **kwargs):
 
         # Make energy(), etc. call
         response = func(molecule=molecule, **kwargs)
-        if kwargs['sow']:
+        if kwargs.get('sow', None):
             continue
 
         if ptype == 'energy':
@@ -1629,10 +1629,10 @@ def cbs(func, label, **kwargs):
                 mce['f_gradient'] = mc['f_gradient']
                 mce['f_hessian'] = mc['f_hessian']
 
-    if kwargs['sow']:
+    if kwargs.get('sow', None):
         return None, None
 
-    psioh.set_specific_retention(constants.PSIF_SCF_MOS, False)
+    psioh.set_specific_retention(psif.PSIF_SCF_MOS, False)
 
     # Build string of title banner
     cbsbanners = ''

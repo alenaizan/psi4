@@ -136,7 +136,6 @@ def _initialize_findif(mol, freq_irrep_only, mode, initialize_string, verbose=0)
         core.print_out("    Number of {!s}SALCs is {:d}.\n".format("" if method_allowed_irreps != 0x1 else
                                                                    "symmetric ", n_salc))
         core.print_out("    Translations projected? {:d}. Rotations projected? {:d}.\n".format(t_project, r_project))
-
     # TODO: Replace with a generator from a stencil to a set of points.
     # Diagonal displacements differ between the totally symmetric irrep, compared to all others.
     # Off-diagonal displacements are the same for both.
@@ -601,7 +600,6 @@ def compute_hessian_from_gradient(findifrec, freq_irrep_only):
                 "  {:d} gradients passed in, including the reference geometry.\n".format(len(displacements) + 1))
 
     data = _initialize_findif(mol, freq_irrep_only, "2_1", init_string)
-
     # For non-totally symmetric CdSALCs, a symmetry operation can convert + and - displacements.
     # Good News: By taking advantage of that, we (potentially) ran less computations.
     # Bad News: We need to find the - displacements from the + computations now.

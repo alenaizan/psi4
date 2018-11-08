@@ -30,7 +30,6 @@ from __future__ import print_function
 from __future__ import absolute_import
 import math
 import itertools
-import json
 
 import numpy as np
 
@@ -44,7 +43,6 @@ try:
     # For parallel nbody computations
     import qcfractal.interface as portal
 except ImportError:
-    dataset = None
     pass
 
 ### Math helper functions
@@ -485,7 +483,7 @@ def compute_nbody_components(func, method_string, metadata):
             if metadata['embedding_charges']: driver_nbody_helper.electrostatic_embedding(metadata, pair=pair)
             # Save energies info
             if kwargs.get('sow', None):
-                mol = portal.Molecule.from_json(json.loads(current_mol.to_schema(1, units='Bohr')))
+                mol = portal.Molecule.from_json(current_mol.to_schema(1, units='Bohr')['molecule'])
                 kwargs['dataset'].add_rxn(current_mol.name(), [(mol, 1.0)])
                 continue
 
